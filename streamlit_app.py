@@ -34,7 +34,7 @@ etf_symbols = ['MAXHEALTH.NS', 'NIF10GETF.NS', 'MOQUALITY.NS', 'MOSMALL250.NS', 
     'EGOLD.NS', 'MON100.NS', 'HDFCGOLD.NS', 'AXISBPSETF.NS', 'AXSENSEX.NS', 'HDFCNIFBAN.NS', 'BANKBETF.NS',
     'GOLD1.NS', 'NAVINIFTY.NS', 'HDFCNIFIT.NS', 'BBNPPGOLD.NS', 'GOLDBEES.NS', 'MAHKTECH.NS', 'SILVERADD.NS',
     'ITBEES.NS', 'SENSEXADD.NS', 'LICNMID100.NS', 'ITIETF.NS', 'UTIBANKETF.NS', 'BANKNIFTY1.NS',
-    'PSUBANKBEES.NS', 'HDFCPVTBAN.NS', 'GSEC10ABSL.NS', 'SETFNIFBK.NS', 'BFSI.NS',
+    'PSUBNKBEES.NS', 'HDFCPVTBAN.NS', 'GSEC10ABSL.NS', 'SETFNIFBK.NS', 'BFSI.NS',
     'AXISBNKETF.NS', 'SBIETFIT.NS', 'BANKBEES.NS', 'SILVRETF.NS', 'PSUBNKIETF.NS', 'HDFCPSUBK.NS',
     'EBBETF0433.NS', 'BANKETFADD.NS', 'SBIETFPB.NS', 'PVTBANIETF.NS', 'GOLDIETF.NS', 'PVTBANKADD.NS',
     'BANKETF.NS', 'SILVERIETF.NS', 'PSUBANKADD.NS', 'HNGSNGBEES.NS', 'BANKIETF.NS', 'ESILVER.NS',
@@ -59,31 +59,128 @@ for i, etf in enumerate(selected_etfs):
     data = yf.download(etf, start=start_date, end=end_date)
     
     data['Month'] = data.index.to_period('M')  
-    monthly_data = data['Close'].resample('M').agg(['first', 'last'])
+    monthly_data = data['Close'].resample('M').agg(['first', 'last']) 
+    monthly_returns = ((monthly_data['last'] - monthly_data['first']) / monthly_data['first']) * 100
     
-    # Flatten columns to access 'first' and 'last'
-    monthly_data.columns = ['_'.join(col).strip() for col in monthly_data.columns.values]
-    
-    monthly_returns = ((monthly_data['Close_first'] - monthly_data['Close_last']) / monthly_data['Close_first']) * 100
-
     data['Year'] = data.index.year  
     yearly_data = data['Close'].resample('Y').agg(['first', 'last']) 
-    
-    # Flatten columns for yearly data
-    yearly_data.columns = ['_'.join(col).strip() for col in yearly_data.columns.values]
-    
-    yearly_returns = ((yearly_data['Close_first'] - yearly_data['Close_last']) / yearly_data['Close_first']) * 100
+    yearly_returns = ((yearly_data['last'] - yearly_data['first']) / yearly_data['first']) * 100
 
-    monthly_fig.add_trace(go.Scatter(x=monthly_returns.index, y=monthly_returns, mode="lines", name=etf, line=dict(color=color_palette[i])))
-    yearly_fig.add_trace(go.Scatter(x=yearly_returns.index, y=yearly_returns, mode="lines", name=etf, line=dict(color=color_palette[i])))
-    cumulative_returns_fig.add_trace(go.Scatter(x=data.index, y=(data['Close'] / data['Close'].iloc[0] - 1) * 100, mode="lines", name=etf, line=dict(color=color_palette[i])))
+    data['Cumulative_Return'] = (data['Close'] / data['Close'].iloc[0]) * 100 - 100
+    dates = data.index
 
-monthly_fig.update_layout(title="Monthly Returns", xaxis_title="Date", yaxis_title="Returns (%)", xaxis_rangeslider_visible=False)
-yearly_fig.update_layout(title="Yearly Returns", xaxis_title="Date", yaxis_title="Returns (%)", xaxis_rangeslider_visible=False)
-cumulative_returns_fig.update_layout(title="Cumulative Returns", xaxis_title="Date", yaxis_title="Returns (%)", xaxis_rangeslider_visible=False)
+    last_6_months_return = (data['Close'].iloc[-1] - data['Close'].iloc[-126]) / data['Close'].iloc[-126] * 100
+    last_3_months_return = (data['Close'].iloc[-1] - data['Close'].iloc[-63]) / data['Close'].iloc[-63] * 100
+    annual_return = (data['Close'].iloc[-1] - data['Close'].iloc[-252]) / data['Close'].iloc[-252] * 100
+
+    years = (data.index[-1] - data.index[0]).days / 365
+    cagr = (data['Close'].iloc[-1] / data['Close'].iloc[0]) ** (1 / years) - 1
+
+    rolling_max = data['Close'].cummax()
+    drawdown = (data['Close'] - rolling_max) / rolling_max
+    max_drawdown = drawdown.min() * 100
+
+    average_annual_return = (data['Close'].iloc[-1] / data['Close'].iloc[-252]) - 1
+    calmar_ratio = average_annual_return / abs(max_drawdown)
+
+    daily_returns = data['Close'].pct_change()
+    sharpe_ratio = daily_returns.mean() / daily_returns.std() * (252 ** 0.5)
+
+    data['Daily_Return'] = data['Close'].pct_change()
+
+    VaR_95 = np.percentile(data['Daily_Return'].dropna(), 5)
+    Expected_Shortfall = (data['Daily_Return'][data['Daily_Return'] <= VaR_95].mean()) * 100
+
+    color = color_palette[i % len(color_palette)]  
+    monthly_fig.add_trace(go.Bar(x=monthly_returns.index, 
+                                 y=monthly_returns, 
+                                 name=f'{etf} Monthly Returns',
+                                 marker=dict(color=color), 
+                                 opacity=0.7))
+
+    yearly_fig.add_trace(go.Bar(x=yearly_returns.index, 
+                                y=yearly_returns, 
+                                name=f'{etf} Yearly Returns',
+                                marker=dict(color=color),
+                                opacity=0.7))
+    
+    cumulative_returns_fig.add_trace(go.Scatter(
+        x=dates, 
+        y=data['Cumulative_Return'], 
+        name=f'{etf} Cumulative Return',
+        mode='lines', 
+        line=dict(color=color, width=2)
+    ))
+    st.write('Performance Metrics')
+    col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.metric(label="Last 6M Return", value=f"{last_6_months_return:.2f}%", delta="")
+    st.metric(label="Annual Return", value=f"{annual_return:.2f}%", delta="")
+
+with col2:
+    st.metric(label="CAGR", value=f"{cagr * 100:.2f}%", delta="")
+    st.metric(label="Max Drawdown", value=f"{max_drawdown:.2f}%", delta="")
+
+with col3:
+    st.metric(label="Last 3M Return", value=f"{last_3_months_return:.2f}%", delta="")
+    st.metric(label="Calmar Ratio", value=f"{calmar_ratio:.2f}", delta="")
+
+with col4:
+    st.metric(label="Sharpe Ratio", value=f"{sharpe_ratio:.2f}", delta="")
+    st.metric(label="Expected Shortfall", value=f"{Expected_Shortfall:.2f}%", delta="")
+
+    
+        
+monthly_fig.update_layout(
+    title=f"Monthly Returns for Selected ETFs ({start_date} to {end_date})",
+    xaxis_title='Month',
+    yaxis_title='Monthly Return (%)',
+    xaxis_tickformat="%b %Y", 
+    barmode='group', 
+    template="plotly_dark",
+)
+
+yearly_fig.update_layout(
+    title=f"Yearly Returns for Selected ETFs ({start_date} to {end_date})",
+    xaxis_title='Year',
+    yaxis_title='Yearly Return (%)',
+    xaxis_tickformat="%Y", 
+    barmode='group', 
+    template="plotly_dark", 
+)
+
+cumulative_returns_fig.update_layout(
+    title=f"Cumulative Returns for Selected ETFs ({start_date} to {end_date})",
+    xaxis_title='Date',
+    yaxis_title='Cumulative Return (%)',
+    xaxis_tickformat="%b %Y",  
+    template="plotly_dark",  
+    showlegend=True,  
+)
 
 st.plotly_chart(monthly_fig)
 st.plotly_chart(yearly_fig)
 st.plotly_chart(cumulative_returns_fig)
+
+# Create a DataFrame to hold the metrics
+metrics_data = {
+    "Metric": [
+        "Last 6 Months Return", "Last 3 Months Return", "Annual Return", "CAGR", "Max Drawdown", "Calmar Ratio", "Sharpe Ratio"
+    ],
+    "Value": [
+        f"{last_6_months_return:.2f}%", f"{last_3_months_return:.2f}%", f"{annual_return:.2f}%", f"{cagr * 100:.2f}%",
+        f"{max_drawdown:.2f}%", f"{calmar_ratio:.2f}", f"{sharpe_ratio:.2f}"
+    ]
+}
+
+# Create a DataFrame
+metrics_df = pd.DataFrame(metrics_data)
+
+# Display the table
+st.subheader("Performance Metrics Table")
+st.table(metrics_df)
+
+
 
 
